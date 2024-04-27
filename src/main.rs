@@ -1,5 +1,6 @@
 use std::io::Read;
 
+#[derive(Debug)]
 enum OpType {
     Add,
     Sub,
@@ -11,23 +12,20 @@ enum OpType {
     Read,
 }
 
+#[derive(Debug)]
 struct Op {
     op_type: OpType,
     operand: usize,
 }
 
-fn main() {
-    // let src = "+++++++++++[>++++++>+++++++++>++++++++>++++>+++>+<<<<<<-]>++++++.>++.+++++++..+++.>>.>-.<<-.<.+++.------.--------.>>>+.>-.";
-    // let src = "++++++++[>++++++++<-]>[<++++>-]+<[>-<[>++++<-]>[<++++++++>-]<[>++++++++<-]+>[>++++++++++[>+++++<-]>+.-.[-]<<[-]<->] <[>>+++++++[>+++++++<-]>.+++++.[-]<<<-]] >[>++++++++[>+++++++<-]>.[-]<<-]<+++++++++++[>+++>+++++++++>+++++++++>+<<<<-]>-.>-.+++++++.+++++++++++.<.>>.++.+++++++..<-.>>-[[-]<]";
-    let src = ",[.,]";
-
+fn parse(src: &str) -> Vec<Op> {
     let mut iter = src.chars().peekable();
     let mut ops: Vec<Op> = vec![];
     let mut stack = vec![];
 
     while let Some(c) = iter.next() {
         match c {
-            '+'|'-'|'>'|'<'|'.'|',' => {
+            '+' | '-' | '>' | '<' | '.' | ',' => {
                 let op_type = match c {
                     '+' => OpType::Add,
                     '-' => OpType::Sub,
@@ -49,22 +47,53 @@ fn main() {
                     }
                 }
 
-                ops.push(Op { op_type, operand: count });
+                ops.push(Op {
+                    op_type,
+                    operand: count,
+                });
             }
             '[' => {
                 stack.push(ops.len());
-                ops.push(Op { op_type: OpType::LoopStart, operand: 0 });
+                ops.push(Op {
+                    op_type: OpType::LoopStart,
+                    operand: 0,
+                });
             }
             ']' => {
                 let start = stack.pop().unwrap();
-                ops[start] = Op { op_type: OpType::LoopStart, operand: ops.len() };
+                ops[start] = Op {
+                    op_type: OpType::LoopStart,
+                    operand: ops.len(),
+                };
 
-                ops.push(Op { op_type: OpType::LoopEnd, operand: start });
+                ops.push(Op {
+                    op_type: OpType::LoopEnd,
+                    operand: start,
+                });
             }
             _ => continue,
         }
     }
 
+    ops
+}
+
+fn print(ops: &[Op]) {
+    for op in ops {
+        match op.op_type {
+            OpType::Add => println!("Add {}", op.operand),
+            OpType::Sub => println!("Sub {}", op.operand),
+            OpType::Next => println!("Next {}", op.operand),
+            OpType::Prev => println!("Prev {}", op.operand),
+            OpType::LoopStart => println!("LoopStart {}", op.operand),
+            OpType::LoopEnd => println!("LoopEnd {}", op.operand),
+            OpType::Print => println!("Print {}", op.operand),
+            OpType::Read => println!("Read {}", op.operand),
+        }
+    }
+}
+
+fn interpret(ops: &[Op]) {
     let mut tape: Vec<i32> = vec![0i32; 1024];
     let mut ptr = 0usize;
     let mut pc = 0usize;
@@ -101,4 +130,15 @@ fn main() {
 
         pc += 1;
     }
+}
+
+fn main() {
+    let src = "+++++++++++[>++++++>+++++++++>++++++++>++++>+++>+<<<<<<-]>++++++.>++.+++++++..+++.>>.>-.<<-.<.+++.------.--------.>>>+.>-.";
+    // let src = "++++++++[>++++++++<-]>[<++++>-]+<[>-<[>++++<-]>[<++++++++>-]<[>++++++++<-]+>[>++++++++++[>+++++<-]>+.-.[-]<<[-]<->] <[>>+++++++[>+++++++<-]>.+++++.[-]<<<-]] >[>++++++++[>+++++++<-]>.[-]<<-]<+++++++++++[>+++>+++++++++>+++++++++>+<<<<-]>-.>-.+++++++.+++++++++++.<.>>.++.+++++++..<-.>>-[[-]<]";
+    // let src = ",[.,]";
+
+    let ops = parse(src);
+
+    print(&ops);
+    interpret(&ops);
 }
