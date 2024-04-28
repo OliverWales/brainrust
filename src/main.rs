@@ -160,7 +160,10 @@ fn compile(ops: &[Op]) -> String {
     let sub_ptr = |c: &mut String, operand: usize| {
         c.push_str(&format!("\tsub x1, x1, #{}\n", operand as i32 * 8))
     };
-    
+
+    let push_x1 = |c: &mut String| c.push_str("\tstr x1, [sp, #-16]!\n");
+    let pop_x1 = |c: &mut String| c.push_str("\tldr x1, [sp], #16\n");
+
     code.push_str(".globl _main\n");
     code.push_str(".align 4\n");
     code.push('\n');
@@ -170,6 +173,7 @@ fn compile(ops: &[Op]) -> String {
     code.push_str("\tmov x0, #1024\n");
     code.push_str("\tbl _calloc\n");
     code.push_str("\tmov x1, x0\n");
+    code.push_str("\tmov x0, #0\n");
     code.push('\n');
 
     for op in ops {
@@ -177,25 +181,24 @@ fn compile(ops: &[Op]) -> String {
 
         match op.op_type {
             OpType::Add => {
-                load(&mut code);
                 add(&mut code, op.operand);
-                store(&mut code);
             }
             OpType::Sub => {
-                load(&mut code);
                 sub(&mut code, op.operand);
-                store(&mut code);
             }
             OpType::Next => {
+                store(&mut code);
                 add_ptr(&mut code, op.operand);
+                load(&mut code);
             }
             OpType::Prev => {
+                store(&mut code);
                 sub_ptr(&mut code, op.operand);
+                load(&mut code);
             }
             OpType::LoopStart => {
                 // If the byte at the data pointer is zero jump forward to the
                 // command after the matching ']'
-                load(&mut code);
                 code.push_str("\tcmp x0, #0\n");
                 code.push_str(&format!("\tbeq l{}_end\n", op.operand));
                 code.push_str(&format!("l{}_start:\n", op.operand));
@@ -203,32 +206,23 @@ fn compile(ops: &[Op]) -> String {
             OpType::LoopEnd => {
                 // If the byte at the data pointer is nonzero jump back to the
                 // command after the matching '['
-                load(&mut code);
                 code.push_str("\tcmp x0, #0\n");
                 code.push_str(&format!("\tbne l{}_start\n", op.operand));
                 code.push_str(&format!("l{}_end:\n", op.operand));
             }
             OpType::Print => {
                 for _ in 0..op.operand {
-                    // Push x1 to stack
-                    code.push_str("\tstr x1, [sp, #-16]!\n");
-                    // Load tape[ptr] to x0
-                    load(&mut code);
+                    push_x1(&mut code);
                     // Print tape[ptr] as char
                     code.push_str("\tbl _putchar\n");
-                    // Pop x1 from stack
-                    code.push_str("\tldr x1, [sp], #16\n");
+                    pop_x1(&mut code);
                 }
             }
             OpType::Read => {
-                // Push x1 to stack
-                code.push_str("\tstr x1, [sp, #-16]!\n");
+                push_x1(&mut code);
                 // Read char to x0
                 code.push_str("\tbl _getchar\n");
-                // Pop x1 from stack
-                code.push_str("\tldr x1, [sp], #16\n");
-                // Store x0 to tape[ptr]
-                store(&mut code);
+                pop_x1(&mut code);
             }
         }
 
