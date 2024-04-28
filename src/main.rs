@@ -143,22 +143,22 @@ fn interpret(ops: &[Op]) {
 }
 
 fn compile(ops: &[Op]) -> String {
-    // x0 = ptr
-    // x1 = current cell = [x0]
+    // x1 = ptr
+    // x0 = current cell = [x1]
 
     let mut code = String::new();
 
-    let load = |c: &mut String| c.push_str("\tldr x1, [x0]\n");
-    let store = |c: &mut String| c.push_str("\tstr x1, [x0]\n");
+    let load = |c: &mut String| c.push_str("\tldr x0, [x1]\n");
+    let store = |c: &mut String| c.push_str("\tstr x0, [x1]\n");
 
-    let add = |c: &mut String, operand: usize| c.push_str(&format!("\tadd x1, x1, #{}\n", operand));
-    let sub = |c: &mut String, operand: usize| c.push_str(&format!("\tsub x1, x1, #{}\n", operand));
+    let add = |c: &mut String, operand: usize| c.push_str(&format!("\tadd x0, x0, #{}\n", operand));
+    let sub = |c: &mut String, operand: usize| c.push_str(&format!("\tsub x0, x0, #{}\n", operand));
 
     let add_ptr = |c: &mut String, operand: usize| {
-        c.push_str(&format!("\tadd x0, x0, #{}\n", operand as i32 * 8))
+        c.push_str(&format!("\tadd x1, x1, #{}\n", operand as i32 * 8))
     };
     let sub_ptr = |c: &mut String, operand: usize| {
-        c.push_str(&format!("\tsub x0, x0, #{}\n", operand as i32 * 8))
+        c.push_str(&format!("\tsub x1, x1, #{}\n", operand as i32 * 8))
     };
     
     code.push_str(".globl _main\n");
@@ -169,6 +169,7 @@ fn compile(ops: &[Op]) -> String {
     code.push_str("\t// Allocate tape memory initialized to zero\n");
     code.push_str("\tmov x0, #1024\n");
     code.push_str("\tbl _calloc\n");
+    code.push_str("\tmov x1, x0\n");
     code.push('\n');
 
     for op in ops {
@@ -195,7 +196,7 @@ fn compile(ops: &[Op]) -> String {
                 // If the byte at the data pointer is zero jump forward to the
                 // command after the matching ']'
                 load(&mut code);
-                code.push_str("\tcmp x1, #0\n");
+                code.push_str("\tcmp x0, #0\n");
                 code.push_str(&format!("\tbeq l{}_end\n", op.operand));
                 code.push_str(&format!("l{}_start:\n", op.operand));
             }
@@ -203,37 +204,31 @@ fn compile(ops: &[Op]) -> String {
                 // If the byte at the data pointer is nonzero jump back to the
                 // command after the matching '['
                 load(&mut code);
-                code.push_str("\tcmp x1, #0\n");
+                code.push_str("\tcmp x0, #0\n");
                 code.push_str(&format!("\tbne l{}_start\n", op.operand));
                 code.push_str(&format!("l{}_end:\n", op.operand));
             }
             OpType::Print => {
                 for _ in 0..op.operand {
-                    // Push x0 to stack
-                    code.push_str("\tstr x0, [sp, #-16]!\n");
+                    // Push x1 to stack
+                    code.push_str("\tstr x1, [sp, #-16]!\n");
                     // Load tape[ptr] to x0
-                    code.push_str("\tldr x0, [x0]\n");
+                    load(&mut code);
                     // Print tape[ptr] as char
                     code.push_str("\tbl _putchar\n");
-                    // Pop x0 from stack
-                    code.push_str("\tldr x0, [sp], #16\n");
+                    // Pop x1 from stack
+                    code.push_str("\tldr x1, [sp], #16\n");
                 }
             }
             OpType::Read => {
-                // Mov ptr to x1
-                code.push_str("\tmov x1, x0\n");
-
-                // Push x0 to stack
+                // Push x1 to stack
                 code.push_str("\tstr x1, [sp, #-16]!\n");
                 // Read char to x0
                 code.push_str("\tbl _getchar\n");
                 // Pop x1 from stack
                 code.push_str("\tldr x1, [sp], #16\n");
                 // Store x0 to tape[ptr]
-                code.push_str("\tstr x0, [x1]\n");
-
-                // Mov ptr back to x0
-                code.push_str("\tmov x0, x1\n");
+                store(&mut code);
             }
         }
 
