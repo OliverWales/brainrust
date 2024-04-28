@@ -220,8 +220,24 @@ fn compile(ops: &[Op]) -> String {
                 code.push('\n');
             }
             OpType::Read => {
-                code.push_str(&format!("\t// TODO: {}\n", ",".repeat(op.operand)));
-                code.push('\n');
+                code.push_str(&format!("\t// {}\n", ",".repeat(op.operand)));
+                
+                // Mov ptr to x1
+                code.push_str("\tmov x1, x0\n");
+
+                for _ in 0..op.operand {
+                    // Push x0 to stack
+                    code.push_str("\tstr x1, [sp, #-16]!\n");
+                    // Read char to x0
+                    code.push_str("\tbl _getchar\n");
+                    // Pop x1 from stack
+                    code.push_str("\tldr x1, [sp], #16\n");
+                    // Store x0 to tape[ptr]
+                    code.push_str("\tstr x0, [x1]\n");
+                }
+
+                // Mov ptr back to x0
+                code.push_str("\tmov x0, x1\n");
             }
         }
     }
@@ -236,24 +252,23 @@ fn compile(ops: &[Op]) -> String {
 }
 
 fn main() {
-    let hello_world = "+++++++++++[>++++++>+++++++++>++++++++>++++>+++>+<<<<<<-]>++++++.>++.+++++++..+++.>>.>-.<<-.<.+++.------.--------.>>>+.>-.";
-    let _cell_size = "++++++++[>++++++++<-]>[<++++>-]+<[>-<[>++++<-]>[<++++++++>-]<[>++++++++<-]+>[>++++++++++[>+++++<-]>+.-.[-]<<[-]<->] <[>>+++++++[>+++++++<-]>.+++++.[-]<<<-]] >[>++++++++[>+++++++<-]>.[-]<<-]<+++++++++++[>+++>+++++++++>+++++++++>+<<<<-]>-.>-.+++++++.+++++++++++.<.>>.++.+++++++..<-.>>-[[-]<]";
+    let _hello_world = "+++++++++++[>++++++>+++++++++>++++++++>++++>+++>+<<<<<<-]>++++++.>++.+++++++..+++.>>.>-.<<-.<.+++.------.--------.>>>+.>-.";
+    let cell_size = "++++++++[>++++++++<-]>[<++++>-]+<[>-<[>++++<-]>[<++++++++>-]<[>++++++++<-]+>[>++++++++++[>+++++<-]>+.-.[-]<<[-]<->] <[>>+++++++[>+++++++<-]>.+++++.[-]<<<-]] >[>++++++++[>+++++++<-]>.[-]<<-]<+++++++++++[>+++>+++++++++>+++++++++>+<<<<-]>-.>-.+++++++.+++++++++++.<.>>.++.+++++++..<-.>>-[[-]<]";
     let _echo = ",[.,]";
 
-    let ops = parse(hello_world);
+    let ops = parse(cell_size);
 
     println!("Parsing code");
     println!("------------");
     print(&ops);
+    println!();
 
-    println!();
-    println!();
     println!("Interpreting code");
     println!("-----------------");
     interpret(&ops);
+    println!();
+    println!();
 
-    println!();
-    println!();
     println!("Compiling code");
     println!("--------------");
 
