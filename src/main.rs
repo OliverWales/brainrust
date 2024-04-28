@@ -143,8 +143,24 @@ fn interpret(ops: &[Op]) {
 }
 
 fn compile(ops: &[Op]) -> String {
+    // x0 = ptr
+    // x1 = current cell = [x0]
+
     let mut code = String::new();
 
+    let load = |c: &mut String| c.push_str("\tldr x1, [x0]\n");
+    let store = |c: &mut String| c.push_str("\tstr x1, [x0]\n");
+
+    let add = |c: &mut String, operand: usize| c.push_str(&format!("\tadd x1, x1, #{}\n", operand));
+    let sub = |c: &mut String, operand: usize| c.push_str(&format!("\tsub x1, x1, #{}\n", operand));
+
+    let add_ptr = |c: &mut String, operand: usize| {
+        c.push_str(&format!("\tadd x0, x0, #{}\n", operand as i32 * 8))
+    };
+    let sub_ptr = |c: &mut String, operand: usize| {
+        c.push_str(&format!("\tsub x0, x0, #{}\n", operand as i32 * 8))
+    };
+    
     code.push_str(".globl _main\n");
     code.push_str(".align 4\n");
     code.push('\n');
@@ -156,57 +172,42 @@ fn compile(ops: &[Op]) -> String {
     code.push('\n');
 
     for op in ops {
+        code.push_str(&format!("\t// {:?} {}\n", op.op_type, op.operand));
+
         match op.op_type {
             OpType::Add => {
-                // tape[ptr] += ops[pc].operand as i32
-                code.push_str(&format!("\t// {}\n", "+".repeat(op.operand)));
-                code.push_str("\tldr x1, [x0]\n");
-                code.push_str(&format!("\tadd x1, x1, #{}\n", op.operand));
-                code.push_str("\tstr x1, [x0]\n");
-                code.push('\n');
+                load(&mut code);
+                add(&mut code, op.operand);
+                store(&mut code);
             }
             OpType::Sub => {
-                // tape[ptr] -= ops[pc].operand as i32
-                code.push_str(&format!("\t// {}\n", "-".repeat(op.operand)));
-                code.push_str("\tldr x1, [x0]\n");
-                code.push_str(&format!("\tsub x1, x1, #{}\n", op.operand));
-                code.push_str("\tstr x1, [x0]\n");
-                code.push('\n');
+                load(&mut code);
+                sub(&mut code, op.operand);
+                store(&mut code);
             }
             OpType::Next => {
-                // ptr += ops[pc].operand
-                code.push_str(&format!("\t// {}\n", ">".repeat(op.operand)));
-                code.push_str(&format!("\tadd x0, x0, #{}\n", op.operand as i32 * 8));
-                code.push('\n');
+                add_ptr(&mut code, op.operand);
             }
             OpType::Prev => {
-                // ptr -= ops[pc].operand
-                code.push_str(&format!("\t// {}\n", "<".repeat(op.operand)));
-                code.push_str(&format!("\tsub x0, x0, #{}\n", op.operand as i32 * 8));
-                code.push('\n');
+                sub_ptr(&mut code, op.operand);
             }
             OpType::LoopStart => {
                 // If the byte at the data pointer is zero jump forward to the
                 // command after the matching ']'
-                code.push_str("\t// [\n");
-                code.push_str("\tldr x1, [x0]\n");
+                load(&mut code);
                 code.push_str("\tcmp x1, #0\n");
                 code.push_str(&format!("\tbeq l{}_end\n", op.operand));
-                code.push('\n');
                 code.push_str(&format!("l{}_start:\n", op.operand));
             }
             OpType::LoopEnd => {
                 // If the byte at the data pointer is nonzero jump back to the
                 // command after the matching '['
-                code.push_str("\t// ]\n");
-                code.push_str("\tldr x1, [x0]\n");
+                load(&mut code);
                 code.push_str("\tcmp x1, #0\n");
                 code.push_str(&format!("\tbne l{}_start\n", op.operand));
-                code.push('\n');
                 code.push_str(&format!("l{}_end:\n", op.operand));
             }
             OpType::Print => {
-                code.push_str(&format!("\t// {}\n", ".".repeat(op.operand)));
                 for _ in 0..op.operand {
                     // Push x0 to stack
                     code.push_str("\tstr x0, [sp, #-16]!\n");
@@ -217,29 +218,26 @@ fn compile(ops: &[Op]) -> String {
                     // Pop x0 from stack
                     code.push_str("\tldr x0, [sp], #16\n");
                 }
-                code.push('\n');
             }
             OpType::Read => {
-                code.push_str(&format!("\t// {}\n", ",".repeat(op.operand)));
-                
                 // Mov ptr to x1
                 code.push_str("\tmov x1, x0\n");
 
-                for _ in 0..op.operand {
-                    // Push x0 to stack
-                    code.push_str("\tstr x1, [sp, #-16]!\n");
-                    // Read char to x0
-                    code.push_str("\tbl _getchar\n");
-                    // Pop x1 from stack
-                    code.push_str("\tldr x1, [sp], #16\n");
-                    // Store x0 to tape[ptr]
-                    code.push_str("\tstr x0, [x1]\n");
-                }
+                // Push x0 to stack
+                code.push_str("\tstr x1, [sp, #-16]!\n");
+                // Read char to x0
+                code.push_str("\tbl _getchar\n");
+                // Pop x1 from stack
+                code.push_str("\tldr x1, [sp], #16\n");
+                // Store x0 to tape[ptr]
+                code.push_str("\tstr x0, [x1]\n");
 
                 // Mov ptr back to x0
                 code.push_str("\tmov x0, x1\n");
             }
         }
+
+        code.push('\n');
     }
 
     // TODO: free tape memory
@@ -253,27 +251,35 @@ fn compile(ops: &[Op]) -> String {
 
 fn main() {
     let _hello_world = "+++++++++++[>++++++>+++++++++>++++++++>++++>+++>+<<<<<<-]>++++++.>++.+++++++..+++.>>.>-.<<-.<.+++.------.--------.>>>+.>-.";
-    let cell_size = "++++++++[>++++++++<-]>[<++++>-]+<[>-<[>++++<-]>[<++++++++>-]<[>++++++++<-]+>[>++++++++++[>+++++<-]>+.-.[-]<<[-]<->] <[>>+++++++[>+++++++<-]>.+++++.[-]<<<-]] >[>++++++++[>+++++++<-]>.[-]<<-]<+++++++++++[>+++>+++++++++>+++++++++>+<<<<-]>-.>-.+++++++.+++++++++++.<.>>.++.+++++++..<-.>>-[[-]<]";
+    let _cell_size = "++++++++[>++++++++<-]>[<++++>-]+<[>-<[>++++<-]>[<++++++++>-]<[>++++++++<-]+>[>++++++++++[>+++++<-]>+.-.[-]<<[-]<->] <[>>+++++++[>+++++++<-]>.+++++.[-]<<<-]] >[>++++++++[>+++++++<-]>.[-]<<-]<+++++++++++[>+++>+++++++++>+++++++++>+<<<<-]>-.>-.+++++++.+++++++++++.<.>>.++.+++++++..<-.>>-[[-]<]";
     let _echo = ",[.,]";
 
-    let ops = parse(cell_size);
+    let src = _hello_world.to_owned() + _cell_size + _echo;
 
-    println!("Parsing code");
-    println!("------------");
-    print(&ops);
-    println!();
+    let ops = parse(&src);
 
-    println!("Interpreting code");
-    println!("-----------------");
-    interpret(&ops);
-    println!();
-    println!();
+    // println!("Parsing code");
+    // println!("------------");
+    // print(&ops);
+    // println!();
+
+    // println!("Interpreting code");
+    // println!("-----------------");
+    // interpret(&ops);
+    // println!();
+    // println!();
 
     println!("Compiling code");
     println!("--------------");
 
     let res = compile(&ops);
 
+    let lines = res
+        .split('\n')
+        .filter(|x| x.starts_with('\t') && !x.starts_with("\t//"))
+        .count();
+
+    println!("Generated {} instructions", lines);
     // write res to file
     let mut file = File::create("out.s").unwrap();
     file.write_all(res.as_bytes()).unwrap();
