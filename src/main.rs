@@ -1,4 +1,6 @@
+use std::fs::File;
 use std::io::Read;
+use std::io::Write;
 
 #[derive(Debug)]
 enum OpType {
@@ -21,7 +23,8 @@ struct Op {
 fn parse(src: &str) -> Vec<Op> {
     let mut iter = src.chars().peekable();
     let mut ops: Vec<Op> = vec![];
-    let mut stack = vec![];
+    let mut loops = 0usize;
+    let mut loop_stack: Vec<usize> = vec![];
 
     while let Some(c) = iter.next() {
         match c {
@@ -53,22 +56,17 @@ fn parse(src: &str) -> Vec<Op> {
                 });
             }
             '[' => {
-                stack.push(ops.len());
                 ops.push(Op {
                     op_type: OpType::LoopStart,
-                    operand: 0,
+                    operand: loops,
                 });
+                loop_stack.push(loops);
+                loops += 1;
             }
             ']' => {
-                let start = stack.pop().unwrap();
-                ops[start] = Op {
-                    op_type: OpType::LoopStart,
-                    operand: ops.len(),
-                };
-
                 ops.push(Op {
                     op_type: OpType::LoopEnd,
-                    operand: start,
+                    operand: loop_stack.pop().unwrap(),
                 });
             }
             _ => continue,
@@ -106,12 +104,24 @@ fn interpret(ops: &[Op]) {
             OpType::Prev => ptr -= ops[pc].operand,
             OpType::LoopStart => {
                 if tape[ptr] == 0 {
-                    pc = ops[pc].operand;
+                    let dest = ops[pc].operand;
+                    let index = ops.iter().position(|op| match op.op_type {
+                        OpType::LoopEnd => op.operand == dest,
+                        _ => false,
+                    });
+
+                    pc = index.unwrap();
                 }
             }
             OpType::LoopEnd => {
                 if tape[ptr] != 0 {
-                    pc = ops[pc].operand;
+                    let dest = ops[pc].operand;
+                    let index = ops.iter().position(|op| match op.op_type {
+                        OpType::LoopStart => op.operand == dest,
+                        _ => false,
+                    });
+
+                    pc = index.unwrap();
                 }
             }
             OpType::Print => {
@@ -132,13 +142,124 @@ fn interpret(ops: &[Op]) {
     }
 }
 
+fn compile(ops: &[Op]) -> String {
+    let mut code = String::new();
+
+    code.push_str(".globl _main\n");
+    code.push_str(".align 4\n");
+    code.push('\n');
+    code.push_str("_main:\n");
+
+    code.push_str("\t// Allocate tape memory initialized to zero\n");
+    code.push_str("\tmov x0, #1024\n");
+    code.push_str("\tbl _calloc\n");
+    code.push('\n');
+
+    for op in ops {
+        match op.op_type {
+            OpType::Add => {
+                // tape[ptr] += ops[pc].operand as i32
+                code.push_str(&format!("\t// {}\n", "+".repeat(op.operand)));
+                code.push_str("\tldr x1, [x0]\n");
+                code.push_str(&format!("\tadd x1, x1, #{}\n", op.operand));
+                code.push_str("\tstr x1, [x0]\n");
+                code.push('\n');
+            }
+            OpType::Sub => {
+                // tape[ptr] -= ops[pc].operand as i32
+                code.push_str(&format!("\t// {}\n", "-".repeat(op.operand)));
+                code.push_str("\tldr x1, [x0]\n");
+                code.push_str(&format!("\tsub x1, x1, #{}\n", op.operand));
+                code.push_str("\tstr x1, [x0]\n");
+                code.push('\n');
+            }
+            OpType::Next => {
+                // ptr += ops[pc].operand
+                code.push_str(&format!("\t// {}\n", ">".repeat(op.operand)));
+                code.push_str(&format!("\tadd x0, x0, #{}\n", op.operand as i32 * 8));
+                code.push('\n');
+            }
+            OpType::Prev => {
+                // ptr -= ops[pc].operand
+                code.push_str(&format!("\t// {}\n", "<".repeat(op.operand)));
+                code.push_str(&format!("\tsub x0, x0, #{}\n", op.operand as i32 * 8));
+                code.push('\n');
+            }
+            OpType::LoopStart => {
+                // If the byte at the data pointer is zero jump forward to the
+                // command after the matching ']'
+                code.push_str("\t// [\n");
+                code.push_str("\tldr x1, [x0]\n");
+                code.push_str("\tcmp x1, #0\n");
+                code.push_str(&format!("\tbeq l{}_end\n", op.operand));
+                code.push('\n');
+                code.push_str(&format!("l{}_start:\n", op.operand));
+            }
+            OpType::LoopEnd => {
+                // If the byte at the data pointer is nonzero jump back to the
+                // command after the matching '['
+                code.push_str("\t// ]\n");
+                code.push_str("\tldr x1, [x0]\n");
+                code.push_str("\tcmp x1, #0\n");
+                code.push_str(&format!("\tbne l{}_start\n", op.operand));
+                code.push('\n');
+                code.push_str(&format!("l{}_end:\n", op.operand));
+            }
+            OpType::Print => {
+                code.push_str(&format!("\t// {}\n", ".".repeat(op.operand)));
+                for _ in 0..op.operand {
+                    // Push x0 to stack
+                    code.push_str("\tstr x0, [sp, #-16]!\n");
+                    // Load tape[ptr] to x0
+                    code.push_str("\tldr x0, [x0]\n");
+                    // Print tape[ptr] as char
+                    code.push_str("\tbl _putchar\n");
+                    // Pop x0 from stack
+                    code.push_str("\tldr x0, [sp], #16\n");
+                }
+                code.push('\n');
+            }
+            OpType::Read => {
+                code.push_str(&format!("\t// TODO: {}\n", ",".repeat(op.operand)));
+                code.push('\n');
+            }
+        }
+    }
+
+    // TODO: free tape memory
+
+    code.push_str("\t// Exit\n");
+    code.push_str("\tmov x0, 0\n");
+    code.push_str("\tbl _exit\n");
+
+    code
+}
+
 fn main() {
-    let src = "+++++++++++[>++++++>+++++++++>++++++++>++++>+++>+<<<<<<-]>++++++.>++.+++++++..+++.>>.>-.<<-.<.+++.------.--------.>>>+.>-.";
-    // let src = "++++++++[>++++++++<-]>[<++++>-]+<[>-<[>++++<-]>[<++++++++>-]<[>++++++++<-]+>[>++++++++++[>+++++<-]>+.-.[-]<<[-]<->] <[>>+++++++[>+++++++<-]>.+++++.[-]<<<-]] >[>++++++++[>+++++++<-]>.[-]<<-]<+++++++++++[>+++>+++++++++>+++++++++>+<<<<-]>-.>-.+++++++.+++++++++++.<.>>.++.+++++++..<-.>>-[[-]<]";
-    // let src = ",[.,]";
+    let hello_world = "+++++++++++[>++++++>+++++++++>++++++++>++++>+++>+<<<<<<-]>++++++.>++.+++++++..+++.>>.>-.<<-.<.+++.------.--------.>>>+.>-.";
+    let _cell_size = "++++++++[>++++++++<-]>[<++++>-]+<[>-<[>++++<-]>[<++++++++>-]<[>++++++++<-]+>[>++++++++++[>+++++<-]>+.-.[-]<<[-]<->] <[>>+++++++[>+++++++<-]>.+++++.[-]<<<-]] >[>++++++++[>+++++++<-]>.[-]<<-]<+++++++++++[>+++>+++++++++>+++++++++>+<<<<-]>-.>-.+++++++.+++++++++++.<.>>.++.+++++++..<-.>>-[[-]<]";
+    let _echo = ",[.,]";
 
-    let ops = parse(src);
+    let ops = parse(hello_world);
 
+    println!("Parsing code");
+    println!("------------");
     print(&ops);
+
+    println!();
+    println!();
+    println!("Interpreting code");
+    println!("-----------------");
     interpret(&ops);
+
+    println!();
+    println!();
+    println!("Compiling code");
+    println!("--------------");
+
+    let res = compile(&ops);
+
+    // write res to file
+    let mut file = File::create("out.s").unwrap();
+    file.write_all(res.as_bytes()).unwrap();
 }
