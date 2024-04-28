@@ -12,12 +12,19 @@ enum OpType {
     LoopEnd,
     Print,
     Read,
+    Clear,
 }
 
 #[derive(Debug)]
 struct Op {
     op_type: OpType,
     operand: usize,
+}
+
+fn preoptimise(src: &str) -> String {
+    // Here we introduce a new operation, 0, which sets the current cell to 0.
+    // Since [-] does this, we can replace it with 0
+    src.replace("[-]", "0")
 }
 
 fn parse(src: &str) -> Vec<Op> {
@@ -28,7 +35,7 @@ fn parse(src: &str) -> Vec<Op> {
 
     while let Some(c) = iter.next() {
         match c {
-            '+' | '-' | '>' | '<' | '.' | ',' => {
+            '+' | '-' | '>' | '<' | '.' | ',' | '0' => {
                 let op_type = match c {
                     '+' => OpType::Add,
                     '-' => OpType::Sub,
@@ -36,6 +43,7 @@ fn parse(src: &str) -> Vec<Op> {
                     '<' => OpType::Prev,
                     '.' => OpType::Print,
                     ',' => OpType::Read,
+                    '0' => OpType::Clear,
                     _ => continue,
                 };
 
@@ -78,16 +86,7 @@ fn parse(src: &str) -> Vec<Op> {
 
 fn print(ops: &[Op]) {
     for op in ops {
-        match op.op_type {
-            OpType::Add => println!("Add {}", op.operand),
-            OpType::Sub => println!("Sub {}", op.operand),
-            OpType::Next => println!("Next {}", op.operand),
-            OpType::Prev => println!("Prev {}", op.operand),
-            OpType::LoopStart => println!("LoopStart {}", op.operand),
-            OpType::LoopEnd => println!("LoopEnd {}", op.operand),
-            OpType::Print => println!("Print {}", op.operand),
-            OpType::Read => println!("Read {}", op.operand),
-        }
+        println!("{:?} {}", op.op_type, op.operand);
     }
 }
 
@@ -136,6 +135,9 @@ fn interpret(ops: &[Op]) {
                     tape[ptr] = buf[0] as i32;
                 }
             }
+            OpType::Clear => {
+                tape[ptr] = 0;
+            }
         }
 
         pc += 1;
@@ -171,7 +173,7 @@ fn compile(ops: &[Op]) -> String {
 
     code.push_str("\t// Allocate tape memory initialized to zero\n");
     code.push_str("\tmov x0, #1024\n");
-    code.push_str("\tbl _calloc\n");
+    code.push_str("\tbl _calloc\n"); // TODO: check success
     code.push_str("\tmov x1, x0\n");
     code.push_str("\tmov x0, #0\n");
     code.push('\n');
@@ -224,6 +226,9 @@ fn compile(ops: &[Op]) -> String {
                 code.push_str("\tbl _getchar\n");
                 pop_x1(&mut code);
             }
+            OpType::Clear => {
+                code.push_str("\tmov x0, #0\n");
+            }
         }
 
         code.push('\n');
@@ -240,12 +245,13 @@ fn compile(ops: &[Op]) -> String {
 
 fn main() {
     let _hello_world = "+++++++++++[>++++++>+++++++++>++++++++>++++>+++>+<<<<<<-]>++++++.>++.+++++++..+++.>>.>-.<<-.<.+++.------.--------.>>>+.>-.";
-    let _cell_size = "++++++++[>++++++++<-]>[<++++>-]+<[>-<[>++++<-]>[<++++++++>-]<[>++++++++<-]+>[>++++++++++[>+++++<-]>+.-.[-]<<[-]<->] <[>>+++++++[>+++++++<-]>.+++++.[-]<<<-]] >[>++++++++[>+++++++<-]>.[-]<<-]<+++++++++++[>+++>+++++++++>+++++++++>+<<<<-]>-.>-.+++++++.+++++++++++.<.>>.++.+++++++..<-.>>-[[-]<]";
+    let _cell_size = "++++++++[>++++++++<-]>[<++++>-]+<[>-<[>++++<-]>[<++++++++>-]<[>++++++++<-]+>[>++++++++++[>+++++<-]>+.-.[-]<<[-]<->]<[>>+++++++[>+++++++<-]>.+++++.[-]<<<-]]>[>++++++++[>+++++++<-]>.[-]<<-]<+++++++++++[>+++>+++++++++>+++++++++>+<<<<-]>-.>-.+++++++.+++++++++++.<.>>.++.+++++++..<-.>>-[[-]<]";
     let _echo = ",[.,]";
 
     let src = _hello_world.to_owned() + _cell_size + _echo;
+    let opt = preoptimise(&src);
 
-    let ops = parse(&src);
+    let ops = parse(&opt);
 
     // println!("Parsing code");
     // println!("------------");
